@@ -12,14 +12,13 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from PIL import Image
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
-from torchvision import models
 
 from config import IMAGE_DIRECTORIES, METADATA_PARQUET, MODEL_DIR
 from dataset import find_image_path
 from dataset import standard_transform as ui_transform
+from model import BACKBONES, build_architecture
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
@@ -50,7 +49,9 @@ def parse_model_info(path):
     filename = os.path.basename(path)
     name = filename.lower()
 
-    backbone, backbone_label = ("mobilenet_v2", "MobileNetV2") if "mobilenet" in name else ("unknown", "Unknown Backbone")
+    # Longest key first so e.g. "efficientnet_b2" wins over a shorter partial match.
+    backbone = next((b for b in sorted(BACKBONES, key=len, reverse=True) if b in name), "unknown")
+    backbone_label = BACKBONES[backbone]["label"] if backbone in BACKBONES else "Unknown Backbone"
 
     if "unaugmented" in name:
         data_type = "Unaugmented"
@@ -84,15 +85,6 @@ MODEL_LOOKUP = {m["display_name"]: m for m in MODEL_INFOS}
 MODEL_NAMES = sorted(MODEL_LOOKUP.keys())
 
 
-def build_model(backbone, num_classes):
-    if backbone == "mobilenet_v2":
-        model = models.mobilenet_v2(weights=None)
-        in_features = model.classifier[1].in_features
-        model.classifier[1] = nn.Linear(in_features, num_classes)
-        return model
-    raise ValueError(f"Unsupported backbone: {backbone}")
-
-
 loaded_model = None
 loaded_model_name = None
 
@@ -102,7 +94,7 @@ def load_selected_model(model_display_name):
 
     if loaded_model is None or loaded_model_name != model_display_name:
         info = MODEL_LOOKUP[model_display_name]
-        model = build_model(info["backbone"], num_classes)
+        model = build_architecture(info["backbone"], num_classes)
 
         state_dict = torch.load(info["path"], map_location=device, weights_only=True)
         model.load_state_dict(state_dict)
